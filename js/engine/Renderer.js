@@ -71,10 +71,10 @@ export class Renderer {
                     ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
                 }
 
-                // Spice sparkle overlay (still adds life to sprite-based terrain)
+                // Spice shimmer (subtle animated sparkle)
                 if (tile.terrain === TERRAIN.SPICE || tile.terrain === TERRAIN.THICK_SPICE) {
-                    const sparkle = Math.sin(Date.now() * 0.003 + x * 3 + y * 7) * 0.5 + 0.5;
-                    ctx.fillStyle = `rgba(255,200,100,${sparkle * 0.1})`;
+                    const sparkle = Math.sin(Date.now() * 0.002 + x * 3 + y * 7) * 0.5 + 0.5;
+                    ctx.fillStyle = `rgba(255,200,100,${sparkle * 0.06})`;
                     ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
                 }
             }
