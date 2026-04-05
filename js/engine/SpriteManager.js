@@ -15,8 +15,9 @@ import { TERRAIN } from '../data/terrain.js';
 import { UNIT_TYPE } from '../data/units.js';
 import { STRUCTURE_TYPE } from '../data/structures.js';
 
-// Sand tile ICN index (row 13, col 0 of terrain.png)
-const SAND_TILE_IDX = 208;
+// Sand tile ICN index — row 9, col 0 (flat uniform sand, no bloom pattern)
+// Tile 208 has a circular spice bloom marker and must NOT be used as base sand
+const SAND_TILE_IDX = 144;
 
 export class SpriteManager {
     constructor() {
