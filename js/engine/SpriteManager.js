@@ -120,139 +120,159 @@ export class SpriteManager {
         return true;
     }
 
-    /** Rock: cool gray-brown tint, fading at edges facing sand */
+    /**
+     * Rock: dark charcoal with rough speckled texture, matching original Dune II.
+     * In the real game, rock is almost black with a craggy gravel-like surface.
+     * Edge tiles blend smoothly into sand via gradient fade.
+     */
     _drawRockOverlay(ctx, x, y, s, interior, up, right, down, left, hash) {
-        // Full interior fill
-        const baseAlpha = interior ? 0.4 : 0.3;
-        ctx.fillStyle = `rgba(80, 75, 65, ${baseAlpha})`;
+        // Heavy dark fill — rock in Dune II is very dark (almost black)
+        ctx.fillStyle = 'rgba(25, 22, 18, 0.82)';
         ctx.fillRect(x, y, s, s);
 
-        // Subtle texture variation
-        const grain = (hash % 3) * 0.03;
-        ctx.fillStyle = `rgba(60, 55, 45, ${grain})`;
-        ctx.fillRect(x, y, s, s);
+        // Rough speckled texture — small lighter flecks like gravel
+        const speckleCount = 8;
+        for (let i = 0; i < speckleCount; i++) {
+            const sx = x + ((hash * (i + 1) * 17) % 100) / 100 * s;
+            const sy = y + ((hash * (i + 1) * 31 + 47) % 100) / 100 * s;
+            const brightness = 60 + ((hash * (i + 3)) % 40);
+            ctx.fillStyle = `rgba(${brightness}, ${brightness - 5}, ${brightness - 15}, 0.4)`;
+            ctx.fillRect(sx, sy, s * 0.08, s * 0.08);
+        }
 
-        // Edge fade: reduce opacity where this tile borders sand
-        const fade = s * 0.35;
-        if (!up) { // top edge faces non-rock
-            const g = ctx.createLinearGradient(x, y, x, y + fade);
-            g.addColorStop(0, 'rgba(194, 125, 60, 0.4)'); // sand color to cover overlay
-            g.addColorStop(1, 'rgba(194, 125, 60, 0)');
-            ctx.fillStyle = g;
-            ctx.fillRect(x, y, s, fade);
-        }
-        if (!down) {
-            const g = ctx.createLinearGradient(x, y + s, x, y + s - fade);
-            g.addColorStop(0, 'rgba(194, 125, 60, 0.4)');
-            g.addColorStop(1, 'rgba(194, 125, 60, 0)');
-            ctx.fillStyle = g;
-            ctx.fillRect(x, y + s - fade, s, fade);
-        }
-        if (!left) {
-            const g = ctx.createLinearGradient(x, y, x + fade, y);
-            g.addColorStop(0, 'rgba(194, 125, 60, 0.4)');
-            g.addColorStop(1, 'rgba(194, 125, 60, 0)');
-            ctx.fillStyle = g;
-            ctx.fillRect(x, y, fade, s);
-        }
-        if (!right) {
-            const g = ctx.createLinearGradient(x + s, y, x + s - fade, y);
-            g.addColorStop(0, 'rgba(194, 125, 60, 0.4)');
-            g.addColorStop(1, 'rgba(194, 125, 60, 0)');
-            ctx.fillStyle = g;
-            ctx.fillRect(x + s - fade, y, fade, s);
-        }
+        // Smooth edge fade where rock meets sand
+        this._drawEdgeFade(ctx, x, y, s, up, right, down, left, s * 0.4);
     }
 
     /** Dune: warm tint with subtle wave pattern */
     _drawDuneOverlay(ctx, x, y, s, hash) {
         ctx.fillStyle = 'rgba(210, 165, 80, 0.15)';
         ctx.fillRect(x, y, s, s);
-        // Subtle dune ridge
         const ridgeY = y + (hash % 3 + 1) * s * 0.25;
         ctx.fillStyle = 'rgba(230, 180, 90, 0.12)';
         ctx.fillRect(x, ridgeY, s, s * 0.15);
     }
 
-    /** Mountain: dark brown-gray, organic looking with edge fade */
+    /**
+     * Mountain: very dark, craggy rock — even darker than regular rock.
+     * Mountains are the darkest terrain, almost pitch black at center.
+     */
     _drawMountainOverlay(ctx, x, y, s, interior, up, right, down, left, hash) {
-        const baseAlpha = interior ? 0.65 : 0.5;
-        ctx.fillStyle = `rgba(40, 32, 20, ${baseAlpha})`;
+        // Very heavy dark fill
+        ctx.fillStyle = `rgba(15, 12, 8, ${interior ? 0.88 : 0.78})`;
         ctx.fillRect(x, y, s, s);
 
-        // Add subtle texture
-        const grain = ((hash * 7) % 5) * 0.04;
-        ctx.fillStyle = `rgba(30, 25, 15, ${grain})`;
+        // Rough rocky texture — slightly lighter speckles
+        for (let i = 0; i < 6; i++) {
+            const sx = x + ((hash * (i + 1) * 23) % 100) / 100 * s;
+            const sy = y + ((hash * (i + 1) * 37 + 19) % 100) / 100 * s;
+            const b = 40 + ((hash * (i + 7)) % 30);
+            ctx.fillStyle = `rgba(${b}, ${b - 5}, ${b - 10}, 0.35)`;
+            ctx.fillRect(sx, sy, s * 0.1, s * 0.1);
+        }
+
+        // Edge fade
+        this._drawEdgeFade(ctx, x, y, s, up, right, down, left, s * 0.45);
+    }
+
+    /**
+     * Spice: reddish-orange streaks/patches on sand, like the original game.
+     * In Dune II, spice appears as dense orange-brown brush strokes on sand.
+     * Thick spice is a nearly solid orange-brown coverage.
+     */
+    _drawSpiceOverlay(ctx, x, y, s, isThick, up, right, down, left, hash) {
+        // Base tint — warm orange wash
+        const baseAlpha = isThick ? 0.55 : 0.3;
+        ctx.fillStyle = `rgba(185, 95, 20, ${baseAlpha})`;
         ctx.fillRect(x, y, s, s);
 
-        // Rocky highlights
-        ctx.fillStyle = 'rgba(90, 75, 50, 0.15)';
-        const hx = x + (hash % 5) * s * 0.15;
-        const hy = y + ((hash * 3) % 5) * s * 0.15;
-        ctx.beginPath();
-        ctx.arc(hx + s * 0.3, hy + s * 0.3, s * 0.2, 0, Math.PI * 2);
-        ctx.fill();
+        // Draw spice as streaky patches (horizontal brush strokes)
+        const numStreaks = isThick ? 10 : 5;
+        for (let i = 0; i < numStreaks; i++) {
+            const sy = y + ((hash * (i + 1) * 13 + 7) % 100) / 100 * s;
+            const sx = x + ((hash * (i + 1) * 7) % 60) / 100 * s;
+            const sw = s * (0.3 + ((hash * (i + 3)) % 50) / 100 * 0.7);
+            const sh = s * (0.06 + ((hash * (i + 5)) % 3) * 0.03);
 
-        // Edge fade toward sand
-        const fade = s * 0.4;
-        const sandFade = 'rgba(194, 125, 60, 0.55)';
+            let alpha = isThick ? 0.65 : 0.45;
+            // Fade near edges that don't have adjacent spice
+            const edgeDist = s * 0.3;
+            if (!up && (sy - y) < edgeDist) alpha *= (sy - y) / edgeDist;
+            if (!down && (y + s - sy) < edgeDist) alpha *= (y + s - sy) / edgeDist;
+            if (!left && (sx - x) < edgeDist) alpha *= (sx - x) / edgeDist;
+            if (!right && (x + s - sx) < edgeDist) alpha *= Math.min(1, (x + s - sx) / edgeDist);
+            if (alpha < 0.05) continue;
+
+            const r = isThick ? 170 + (i * 7 % 25) : 190 + (i * 11 % 25);
+            const g = isThick ? 70 + (i * 5 % 20) : 90 + (i * 7 % 25);
+            ctx.fillStyle = `rgba(${r}, ${g}, 15, ${alpha})`;
+            ctx.fillRect(sx, sy, sw, sh);
+        }
+
+        // Extra density dots for thick spice
+        if (isThick) {
+            for (let i = 0; i < 6; i++) {
+                const dx = x + ((hash * (i + 11) * 19) % 100) / 100 * s;
+                const dy = y + ((hash * (i + 13) * 23) % 100) / 100 * s;
+                ctx.fillStyle = 'rgba(160, 75, 10, 0.5)';
+                ctx.beginPath();
+                ctx.arc(dx, dy, s * 0.06, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    }
+
+    /**
+     * Shared edge fade helper — draws sand-colored gradients on edges
+     * that face different terrain, plus radial corner fades to create
+     * smooth organic rounded transitions like the original game.
+     */
+    _drawEdgeFade(ctx, x, y, s, up, right, down, left, fade) {
+        const sandR = 180, sandG = 120, sandB = 55;
+        const sandFull = `rgba(${sandR},${sandG},${sandB}, 0.95)`;
+        const sandMid  = `rgba(${sandR},${sandG},${sandB}, 0.4)`;
+        const sandZero = `rgba(${sandR},${sandG},${sandB}, 0)`;
+
+        // Cardinal edge fades
         if (!up) {
             const g = ctx.createLinearGradient(x, y, x, y + fade);
-            g.addColorStop(0, sandFade); g.addColorStop(1, 'rgba(194, 125, 60, 0)');
+            g.addColorStop(0, sandFull); g.addColorStop(0.5, sandMid); g.addColorStop(1, sandZero);
             ctx.fillStyle = g; ctx.fillRect(x, y, s, fade);
         }
         if (!down) {
             const g = ctx.createLinearGradient(x, y + s, x, y + s - fade);
-            g.addColorStop(0, sandFade); g.addColorStop(1, 'rgba(194, 125, 60, 0)');
+            g.addColorStop(0, sandFull); g.addColorStop(0.5, sandMid); g.addColorStop(1, sandZero);
             ctx.fillStyle = g; ctx.fillRect(x, y + s - fade, s, fade);
         }
         if (!left) {
             const g = ctx.createLinearGradient(x, y, x + fade, y);
-            g.addColorStop(0, sandFade); g.addColorStop(1, 'rgba(194, 125, 60, 0)');
+            g.addColorStop(0, sandFull); g.addColorStop(0.5, sandMid); g.addColorStop(1, sandZero);
             ctx.fillStyle = g; ctx.fillRect(x, y, fade, s);
         }
         if (!right) {
             const g = ctx.createLinearGradient(x + s, y, x + s - fade, y);
-            g.addColorStop(0, sandFade); g.addColorStop(1, 'rgba(194, 125, 60, 0)');
+            g.addColorStop(0, sandFull); g.addColorStop(0.5, sandMid); g.addColorStop(1, sandZero);
             ctx.fillStyle = g; ctx.fillRect(x + s - fade, y, fade, s);
         }
-    }
 
-    /** Spice: orange speckles on sand, density varies */
-    _drawSpiceOverlay(ctx, x, y, s, isThick, up, right, down, left, hash) {
-        // Base orange tint — thicker spice gets more coverage
-        const baseAlpha = isThick ? 0.45 : 0.25;
-        ctx.fillStyle = `rgba(210, 140, 30, ${baseAlpha})`;
-        ctx.fillRect(x, y, s, s);
-
-        // Draw spice speckles — deterministic based on tile position
-        const numDots = isThick ? 12 : 6;
-        const dotSize = s * (isThick ? 0.12 : 0.09);
-
-        for (let i = 0; i < numDots; i++) {
-            // Deterministic pseudo-random positions within tile
-            const dx = ((hash * (i + 1) * 7) % 100) / 100;
-            const dy = ((hash * (i + 1) * 13 + 37) % 100) / 100;
-            const dotX = x + dx * s;
-            const dotY = y + dy * s;
-
-            // Fade dots near edges that face non-spice
-            let alpha = isThick ? 0.7 : 0.5;
-            const edgeDist = s * 0.3;
-            if (!up && (dotY - y) < edgeDist) alpha *= (dotY - y) / edgeDist;
-            if (!down && (y + s - dotY) < edgeDist) alpha *= (y + s - dotY) / edgeDist;
-            if (!left && (dotX - x) < edgeDist) alpha *= (dotX - x) / edgeDist;
-            if (!right && (x + s - dotX) < edgeDist) alpha *= (x + s - dotX) / edgeDist;
-
-            if (alpha < 0.05) continue;
-
-            const r = isThick ? 200 + (i * 7 % 30) : 220 + (i * 11 % 20);
-            const g = isThick ? 100 + (i * 5 % 30) : 140 + (i * 7 % 30);
-            const b = isThick ? 10 : 20 + (i * 3 % 15);
-            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-            ctx.beginPath();
-            ctx.arc(dotX, dotY, dotSize + (i % 3) * s * 0.03, 0, Math.PI * 2);
-            ctx.fill();
+        // Corner radial fades — rounds off the square corners where two edges meet
+        const cornerR = fade * 1.1;
+        const corners = [
+            { cx: x,     cy: y,     hasU: !up, hasL: !left },      // top-left
+            { cx: x + s, cy: y,     hasU: !up, hasR: !right },     // top-right
+            { cx: x,     cy: y + s, hasD: !down, hasL: !left },    // bottom-left
+            { cx: x + s, cy: y + s, hasD: !down, hasR: !right },   // bottom-right
+        ];
+        for (const c of corners) {
+            const isExposedCorner = (c.hasU || c.hasD) && (c.hasL || c.hasR);
+            if (isExposedCorner) {
+                const g = ctx.createRadialGradient(c.cx, c.cy, 0, c.cx, c.cy, cornerR);
+                g.addColorStop(0, sandFull);
+                g.addColorStop(0.4, sandMid);
+                g.addColorStop(1, sandZero);
+                ctx.fillStyle = g;
+                ctx.fillRect(c.cx - cornerR, c.cy - cornerR, cornerR * 2, cornerR * 2);
+            }
         }
     }
 
