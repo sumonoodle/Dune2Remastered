@@ -1,0 +1,18 @@
+# Reference codebases (read-only, not part of this repo)
+reference-opendune/
+reference-dunedynasty/
+reference-dune2js/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Node (if ever needed)
+node_modules/

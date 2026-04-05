@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dune II Remastered</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        <div id="sidebar">
+            <div id="sidebar-house-info">
+                <div id="house-name">House Atreides</div>
+                <div id="credits-display">
+                    <span class="label">Credits:</span>
+                    <span id="credits-value">0</span>
+                </div>
+                <div id="power-display">
+                    <span class="label">Power:</span>
+                    <span id="power-value">0 / 0</span>
+                </div>
+            </div>
+            <div id="minimap-container">
+                <canvas id="minimap-canvas" width="128" height="128"></canvas>
+            </div>
+            <div id="build-panel">
+                <div id="build-tabs">
+                    <button class="build-tab active" data-tab="structures">Build</button>
+                    <button class="build-tab" data-tab="units">Units</button>
+                </div>
+                <div id="build-items"></div>
+            </div>
+            <div id="selection-info">
+                <div id="selection-details"></div>
+            </div>
+        </div>
+        <div id="debug-panel" style="display:none;">
+            <div id="debug-fps">FPS: 0</div>
+            <div id="debug-units">Units: 0</div>
+            <div id="debug-tick">Tick: 0</div>
+            <div id="debug-mouse">Mouse: 0, 0</div>
+            <div id="debug-camera">Camera: 0, 0</div>
+            <div id="debug-zoom">Zoom: 1.0</div>
+        </div>
+    </div>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

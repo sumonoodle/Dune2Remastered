@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dune2",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8080", "--directory", "/Users/mattsummers/Documents/Projects/Dune 2 Remastered/Dune2Remastered"],
+      "port": 8080
+    }
+  ]
+}
