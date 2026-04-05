@@ -44,8 +44,8 @@ export class GameMap {
 
                 this.tiles[i] = {
                     terrain,
-                    spiceAmount: terrain === TERRAIN.THICK_SPICE ? 8 :
-                                 terrain === TERRAIN.SPICE ? 4 : 0,
+                    spiceAmount: terrain === TERRAIN.THICK_SPICE ? 40 :
+                                 terrain === TERRAIN.SPICE ? 20 : 0,
                     structureId: null,
                     unitId: null,
                     visible: true  // fog of war (Phase 3)
@@ -87,10 +87,10 @@ export class GameMap {
 
                 if (dist < radius * 0.4) {
                     tile.terrain = TERRAIN.THICK_SPICE;
-                    tile.spiceAmount = 8;
+                    tile.spiceAmount = 40;
                 } else if (dist < radius * 0.8) {
                     tile.terrain = TERRAIN.SPICE;
-                    tile.spiceAmount = 4;
+                    tile.spiceAmount = 20;
                 }
             }
         }
@@ -204,7 +204,7 @@ export class GameMap {
         if (tile.spiceAmount <= 0) {
             tile.spiceAmount = 0;
             tile.terrain = TERRAIN.SAND;
-        } else if (tile.spiceAmount <= 4 && tile.terrain === TERRAIN.THICK_SPICE) {
+        } else if (tile.spiceAmount <= 20 && tile.terrain === TERRAIN.THICK_SPICE) {
             tile.terrain = TERRAIN.SPICE;
         }
 
@@ -226,7 +226,7 @@ export class GameMap {
                 // Chance to become thick spice
                 if (Math.random() < 0.3) {
                     tile.terrain = TERRAIN.THICK_SPICE;
-                    tile.spiceAmount = 8;
+                    tile.spiceAmount = 40;
                 }
             } else if (canGrowSpice(tile.terrain) && tile.terrain !== TERRAIN.SPICE) {
                 // Check if adjacent to spice
@@ -239,7 +239,7 @@ export class GameMap {
                 );
                 if (hasAdjacentSpice && Math.random() < 0.2) {
                     tile.terrain = TERRAIN.SPICE;
-                    tile.spiceAmount = 4;
+                    tile.spiceAmount = 20;
                 }
             }
         }

@@ -141,12 +141,14 @@ export class Unit {
                     this.harvestTimer = 0;
                     const tx = Math.floor(this.x);
                     const ty = Math.floor(this.y);
-                    const harvested = game.map.harvestSpice(tx, ty, 50);
+                    const harvested = game.map.harvestSpice(tx, ty, 5);
                     this.spiceCarried += harvested;
 
-                    if (this.spiceCarried >= this.spiceCapacity || harvested === 0) {
+                    if (this.spiceCarried >= this.spiceCapacity) {
+                        // Full — return to refinery
                         this._returnToRefinery(game);
                     } else if (harvested === 0) {
+                        // Tile depleted — seek next spice tile
                         this._seekSpice(game);
                     }
                 }
@@ -280,7 +282,7 @@ export class Unit {
                                 this._flyTo(dropX, dropY);
                                 this.carryallState = 'delivering';
                             } else {
-                                this._carryallDropUnit();
+                                this._carryallDropUnit(game);
                             }
                         } else {
                             // Empty/partial harvester → deliver to nearest spice
@@ -289,7 +291,7 @@ export class Unit {
                                 this._flyTo(spiceTile.x + 0.5, spiceTile.y + 0.5);
                                 this.carryallState = 'delivering';
                             } else {
-                                this._carryallDropUnit();
+                                this._carryallDropUnit(game);
                             }
                         }
                     } else {
@@ -300,7 +302,7 @@ export class Unit {
 
             case 'delivering':
                 if (!this.path || this.pathIndex >= (this.path?.length || 0)) {
-                    this._carryallDropUnit();
+                    this._carryallDropUnit(game);
                 }
                 break;
         }
@@ -313,7 +315,7 @@ export class Unit {
         this.state = 'moving';
     }
 
-    _carryallDropUnit() {
+    _carryallDropUnit(game) {
         if (this.carryingUnit) {
             this.carryingUnit.x = this.x;
             this.carryingUnit.y = this.y;
@@ -322,7 +324,13 @@ export class Unit {
             this.carryingUnit.assignedCarryall = null;
             // Resume harvester AI
             if (this.carryingUnit.type === UNIT_TYPE.HARVESTER) {
-                this.carryingUnit.harvesterState = 'idle';
+                if (this.carryingUnit.spiceCarried > 0) {
+                    // Dropped near refinery — start depositing immediately
+                    this.carryingUnit.harvesterState = 'depositing';
+                    this.carryingUnit.harvestTimer = 0;
+                } else {
+                    this.carryingUnit.harvesterState = 'idle';
+                }
             }
         }
         this._carryallReset();
