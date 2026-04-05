@@ -1,12 +1,13 @@
 /**
- * SpriteManager - loads and provides access to Dune II sprite assets
+ * SpriteManager - Dune II sprite rendering with authentic autotiling
  *
- * Sprite sheets extracted from original Dune II data:
- * - terrain.png: 16x16 terrain tiles from ICON.ICN (16 cols, 13 rows = 206 tiles)
- * - units.png: 16x16 unit sprites from UNITS.SHP (16 cols, 8 rows = 117 frames)
- * - units1.png: 24x24 unit sprites from UNITS1.SHP (16 cols, 6 rows = 87 frames)
- * - units2.png: 16x16 unit sprites from UNITS2.SHP (16 cols, 3 rows = 40 frames)
- * - shapes.png: Structure/UI sprites from SHAPES.SHP
+ * Terrain uses a 4-bit neighbor bitmask autotile system matching the original
+ * Dune II engine (Map_CreateLandscape in map.c). Each terrain type has 16
+ * tile variants selected by checking which cardinal neighbors share the same
+ * terrain category. The bitmask is: up=1, right=2, down=4, left=8.
+ *
+ * The tile index lookup chain: terrain type + neighbor mask → autotile index
+ * → ICON.MAP landscape group → ICN tile index → terrain.png sprite.
  */
 
 import { TERRAIN } from '../data/terrain.js';
@@ -23,16 +24,10 @@ export class SpriteManager {
     async _loadAll() {
         const sheets = ['terrain', 'units', 'units1', 'units2', 'shapes'];
         const promises = sheets.map(name => {
-            return new Promise((resolve, reject) => {
+            return new Promise((resolve) => {
                 const img = new Image();
-                img.onload = () => {
-                    this.images[name] = img;
-                    resolve();
-                };
-                img.onerror = () => {
-                    console.warn(`Failed to load ${name}.png, will use fallback rendering`);
-                    resolve(); // Don't reject - just skip missing sprites
-                };
+                img.onload = () => { this.images[name] = img; resolve(); };
+                img.onerror = () => { console.warn(`Failed to load ${name}.png`); resolve(); };
                 img.src = `assets/${name}.png`;
             });
         });
@@ -41,193 +36,221 @@ export class SpriteManager {
         console.log('Sprites loaded:', Object.keys(this.images).join(', '));
     }
 
-    ready() {
-        return this.loaded;
-    }
+    ready() { return this.loaded; }
 
     /**
-     * Draw a terrain tile from the ICN sprite sheet
-     * @param {CanvasRenderingContext2D} ctx
-     * @param {number} terrainType - TERRAIN enum value
-     * @param {number} x - screen x
-     * @param {number} y - screen y
-     * @param {number} size - render size (default 32)
-     * @param {number} tileX - map tile x (for variation)
-     * @param {number} tileY - map tile y (for variation)
+     * Draw a terrain tile using Dune II's autotile system.
+     * Checks the 4 cardinal neighbors to select the correct transition tile.
      */
-    drawTerrain(ctx, terrainType, x, y, size, tileX, tileY) {
+    drawTerrain(ctx, gameMap, tileX, tileY, screenX, screenY, size) {
         const img = this.images.terrain;
         if (!img) return false;
 
-        const tileIdx = this._getTerrainTileIndex(terrainType, tileX, tileY);
-        const col = tileIdx % 16;
-        const row = Math.floor(tileIdx / 16);
+        const tile = gameMap.getTile(tileX, tileY);
+        if (!tile) return false;
 
-        ctx.drawImage(img, col * 16, row * 16, 16, 16, x, y, size, size);
+        const icnIdx = this._getAutotiledIndex(gameMap, tileX, tileY, tile.terrain);
+        const col = icnIdx % 16;
+        const row = Math.floor(icnIdx / 16);
+        ctx.drawImage(img, col * 16, row * 16, 16, 16, screenX, screenY, size, size);
         return true;
     }
 
     /**
-     * Draw a unit sprite
-     * @param {CanvasRenderingContext2D} ctx
-     * @param {number} unitType - UNIT_TYPE enum value
-     * @param {number} houseId - house color variant
-     * @param {number} x - center x
-     * @param {number} y - center y
-     * @param {number} size - render size
+     * Core autotiling: replicate Dune II's Map_CreateLandscape logic.
+     * Build a 4-bit neighbor mask and index into the landscape tile table.
      */
+    _getAutotiledIndex(map, tx, ty, terrain) {
+        // Get cardinal neighbor terrain types
+        const up    = map.getTerrain(tx, ty - 1);
+        const right = map.getTerrain(tx + 1, ty);
+        const down  = map.getTerrain(tx, ty + 1);
+        const left  = map.getTerrain(tx - 1, ty);
+
+        // Classify terrain into rendering categories
+        const cat = terrainCategory(terrain);
+
+        switch (cat) {
+            case CAT_SAND:
+                return AUTOTILE_SAND;
+
+            case CAT_ROCK: {
+                // Rock checks for MOUNTAIN neighbors to create transitions
+                let mask = 0;
+                if (terrainCategory(up)    === CAT_MOUNTAIN) mask |= 1;
+                if (terrainCategory(right) === CAT_MOUNTAIN) mask |= 2;
+                if (terrainCategory(down)  === CAT_MOUNTAIN) mask |= 4;
+                if (terrainCategory(left)  === CAT_MOUNTAIN) mask |= 8;
+                return AUTOTILE_ROCK[mask];
+            }
+
+            case CAT_DUNE: {
+                // Dune checks for same-type neighbors
+                let mask = 0;
+                if (terrainCategory(up)    === CAT_DUNE) mask |= 1;
+                if (terrainCategory(right) === CAT_DUNE) mask |= 2;
+                if (terrainCategory(down)  === CAT_DUNE) mask |= 4;
+                if (terrainCategory(left)  === CAT_DUNE) mask |= 8;
+                return AUTOTILE_DUNE[mask];
+            }
+
+            case CAT_MOUNTAIN: {
+                let mask = 0;
+                if (terrainCategory(up)    === CAT_MOUNTAIN) mask |= 1;
+                if (terrainCategory(right) === CAT_MOUNTAIN) mask |= 2;
+                if (terrainCategory(down)  === CAT_MOUNTAIN) mask |= 4;
+                if (terrainCategory(left)  === CAT_MOUNTAIN) mask |= 8;
+                return AUTOTILE_MOUNTAIN[mask];
+            }
+
+            case CAT_SPICE: {
+                // Spice checks for THICK_SPICE neighbors
+                let mask = 0;
+                if (terrainCategory(up)    === CAT_THICK_SPICE) mask |= 1;
+                if (terrainCategory(right) === CAT_THICK_SPICE) mask |= 2;
+                if (terrainCategory(down)  === CAT_THICK_SPICE) mask |= 4;
+                if (terrainCategory(left)  === CAT_THICK_SPICE) mask |= 8;
+                return AUTOTILE_SPICE[mask];
+            }
+
+            case CAT_THICK_SPICE: {
+                let mask = 0;
+                if (terrainCategory(up)    === CAT_THICK_SPICE) mask |= 1;
+                if (terrainCategory(right) === CAT_THICK_SPICE) mask |= 2;
+                if (terrainCategory(down)  === CAT_THICK_SPICE) mask |= 4;
+                if (terrainCategory(left)  === CAT_THICK_SPICE) mask |= 8;
+                return AUTOTILE_THICK_SPICE[mask];
+            }
+
+            case CAT_CONCRETE:
+                return AUTOTILE_CONCRETE;
+            case CAT_WALL:
+                return AUTOTILE_WALL;
+            default:
+                return AUTOTILE_SAND;
+        }
+    }
+
     drawUnit(ctx, unitType, houseId, x, y, size) {
         const mapping = UNIT_SPRITE_MAP[unitType];
         if (!mapping) return false;
-
         const img = this.images[mapping.sheet];
         if (!img) return false;
 
-        const frameIdx = mapping.frame;
         const spriteSize = mapping.size;
         const cols = Math.floor(img.width / spriteSize);
-        const col = frameIdx % cols;
-        const row = Math.floor(frameIdx / cols);
-
-        const halfSize = size / 2;
-        ctx.drawImage(
-            img,
-            col * spriteSize, row * spriteSize, spriteSize, spriteSize,
-            x - halfSize, y - halfSize, size, size
-        );
+        const col = mapping.frame % cols;
+        const row = Math.floor(mapping.frame / cols);
+        const half = size / 2;
+        ctx.drawImage(img, col * spriteSize, row * spriteSize, spriteSize, spriteSize,
+            x - half, y - half, size, size);
         return true;
     }
 
-    /**
-     * Draw a structure sprite from the SHAPES sheet
-     * Structures in SHAPES.SHP are variable-sized composites
-     */
     drawStructure(ctx, structureType, x, y, width, height) {
-        // Structures use icon tiles from ICON.ICN, composed into larger buildings
-        // For now, use the shapes sheet for key structure graphics
         const mapping = STRUCTURE_SPRITE_MAP[structureType];
         if (!mapping) return false;
-
         const img = this.images.terrain;
         if (!img) return false;
 
-        // Draw structure as a grid of terrain tiles
         const tileW = width / mapping.tw;
         const tileH = height / mapping.th;
         for (let dy = 0; dy < mapping.th; dy++) {
             for (let dx = 0; dx < mapping.tw; dx++) {
-                const tileIdx = mapping.tiles[dy * mapping.tw + dx];
-                if (tileIdx < 0) continue;
-                const col = tileIdx % 16;
-                const row = Math.floor(tileIdx / 16);
+                const idx = mapping.tiles[dy * mapping.tw + dx];
+                if (idx < 0) continue;
+                const col = idx % 16;
+                const row = Math.floor(idx / 16);
                 ctx.drawImage(img, col * 16, row * 16, 16, 16,
                     x + dx * tileW, y + dy * tileH, tileW, tileH);
             }
         }
         return true;
     }
+}
 
-    /**
-     * Map terrain type to an ICN tile index
-     * Uses tile position for variation within the same terrain type
-     */
-    _getTerrainTileIndex(terrainType, tileX, tileY) {
-        // Hash for consistent random variation per tile
-        const hash = ((tileX * 7 + tileY * 13) & 0xFF);
+// ============================================================
+// Terrain category classification
+// Maps our 15 terrain types into rendering categories
+// ============================================================
+const CAT_SAND = 0;
+const CAT_ROCK = 1;
+const CAT_DUNE = 2;
+const CAT_MOUNTAIN = 3;
+const CAT_SPICE = 4;
+const CAT_THICK_SPICE = 5;
+const CAT_CONCRETE = 6;
+const CAT_WALL = 7;
 
-        switch (terrainType) {
-            // Sand tiles (top of sheet, rows 0-1)
-            case TERRAIN.SAND:
-                return TERRAIN_TILES.SAND[hash % TERRAIN_TILES.SAND.length];
-            case TERRAIN.DUNE:
-                return TERRAIN_TILES.DUNE[hash % TERRAIN_TILES.DUNE.length];
-            case TERRAIN.PARTIAL_DUNE:
-                return TERRAIN_TILES.PARTIAL_DUNE[hash % TERRAIN_TILES.PARTIAL_DUNE.length];
-
-            // Rock tiles
-            case TERRAIN.ROCK:
-                return TERRAIN_TILES.ROCK[hash % TERRAIN_TILES.ROCK.length];
-            case TERRAIN.MOSTLY_ROCK:
-                return TERRAIN_TILES.MOSTLY_ROCK[hash % TERRAIN_TILES.MOSTLY_ROCK.length];
-            case TERRAIN.PARTIAL_ROCK:
-                return TERRAIN_TILES.PARTIAL_ROCK[hash % TERRAIN_TILES.PARTIAL_ROCK.length];
-
-            // Mountain tiles
-            case TERRAIN.MOUNTAIN:
-                return TERRAIN_TILES.MOUNTAIN[hash % TERRAIN_TILES.MOUNTAIN.length];
-            case TERRAIN.PARTIAL_MOUNTAIN:
-                return TERRAIN_TILES.PARTIAL_MOUNTAIN[hash % TERRAIN_TILES.PARTIAL_MOUNTAIN.length];
-
-            // Spice tiles
-            case TERRAIN.SPICE:
-                return TERRAIN_TILES.SPICE[hash % TERRAIN_TILES.SPICE.length];
-            case TERRAIN.THICK_SPICE:
-                return TERRAIN_TILES.THICK_SPICE[hash % TERRAIN_TILES.THICK_SPICE.length];
-
-            // Built terrain
-            case TERRAIN.CONCRETE:
-                return TERRAIN_TILES.CONCRETE[0];
-            case TERRAIN.WALL:
-                return TERRAIN_TILES.WALL[0];
-            case TERRAIN.STRUCTURE:
-                return TERRAIN_TILES.STRUCTURE[0];
-            case TERRAIN.DESTROYED_WALL:
-                return TERRAIN_TILES.DESTROYED_WALL[0];
-            case TERRAIN.BLOOM:
-                return TERRAIN_TILES.BLOOM[0];
-
-            default:
-                return 0;
-        }
+function terrainCategory(terrain) {
+    switch (terrain) {
+        case TERRAIN.SAND:              return CAT_SAND;
+        case TERRAIN.PARTIAL_ROCK:      return CAT_ROCK;
+        case TERRAIN.DUNE:              return CAT_DUNE;
+        case TERRAIN.PARTIAL_DUNE:      return CAT_DUNE;
+        case TERRAIN.ROCK:              return CAT_ROCK;
+        case TERRAIN.MOSTLY_ROCK:       return CAT_ROCK;
+        case TERRAIN.MOUNTAIN:          return CAT_MOUNTAIN;
+        case TERRAIN.PARTIAL_MOUNTAIN:  return CAT_MOUNTAIN;
+        case TERRAIN.SPICE:             return CAT_SPICE;
+        case TERRAIN.THICK_SPICE:       return CAT_THICK_SPICE;
+        case TERRAIN.CONCRETE:          return CAT_CONCRETE;
+        case TERRAIN.WALL:              return CAT_WALL;
+        case TERRAIN.STRUCTURE:         return CAT_ROCK; // Structures sit on rock
+        case TERRAIN.DESTROYED_WALL:    return CAT_ROCK;
+        case TERRAIN.BLOOM:             return CAT_SAND;
+        default:                        return CAT_SAND;
     }
 }
 
 // ============================================================
-// Terrain tile index mapping (indices into ICON.ICN / terrain.png)
-// These are the actual tile indices visible in the sprite sheet
-// Identified by examining the extracted terrain tiles
+// Autotile lookup tables extracted from ICON.MAP
+// Index by 4-bit neighbor bitmask: up=1, right=2, down=4, left=8
+// Values are ICN tile indices into terrain.png
 // ============================================================
-// Terrain tile indices from ICN tile sheet (389 tiles, 16x16 each)
-// Identified by analyzing average pixel colors per tile
-const TERRAIN_TILES = {
-    // Sand: uniform warm brown tiles (avg ~180,117,55)
-    SAND: [144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155],
 
-    // Dune: sand with slight variation (transition tiles)
-    DUNE: [128, 129, 132, 144],
-    PARTIAL_DUNE: [128, 130, 131, 134],
+// Sand: single fixed tile (no autotiling)
+const AUTOTILE_SAND = 208;
 
-    // Rock: gray-green natural rock (tiles 34-95 range)
-    ROCK: [37, 38, 39, 42, 43, 44, 45, 50, 65, 66, 67, 79, 82, 83, 93, 94, 95],
-    MOSTLY_ROCK: [34, 35, 36, 40, 41, 46, 51, 52, 53, 68, 69],
-    PARTIAL_ROCK: [47, 48, 49, 54, 55, 70, 71, 73, 74, 77, 78],
+// Rock: 16 variants based on which neighbors are MOUNTAIN
+// mask: 0=isolated, 1=mtn above, 2=mtn right, 4=mtn below, 8=mtn left
+const AUTOTILE_ROCK = [
+    209, 210, 211, 212, 220, 221, 222, 229,
+    230, 231, 213, 214, 215, 223, 224, 225
+];
 
-    // Mountain: very dark tiles (avg <30)
-    MOUNTAIN: [1, 2, 3, 4, 5, 6, 33],
-    PARTIAL_MOUNTAIN: [7, 8, 9, 10, 11, 12, 15, 160, 161],
+// Dune: 16 variants based on which neighbors are also DUNE
+const AUTOTILE_DUNE = [
+    232, 233, 234, 216, 217, 218, 226, 227,
+    228, 235, 236, 237, 219, 217, 218, 226
+];
 
-    // Spice: orange-brown tiles (avg R>175, G~100-115)
-    SPICE: [176, 177, 178, 179, 180, 181, 182, 183],
-    // Thick spice: more saturated orange (avg R>170, G<93)
-    THICK_SPICE: [192, 193, 194, 195, 196, 197, 198, 199],
+// Mountain: 16 variants based on which neighbors are MOUNTAIN
+const AUTOTILE_MOUNTAIN = [
+    227, 228, 235, 236, 237, 238, 239, 244,
+    245, 125, 240, 246, 247, 241, 242, 248
+];
 
-    // Built terrain
-    CONCRETE: [100],
-    WALL: [124],
-    STRUCTURE: [100],
-    DESTROYED_WALL: [125],
-    BLOOM: [127],
-};
+// Spice: 16 variants based on which neighbors are THICK_SPICE
+const AUTOTILE_SPICE = [
+    249, 241, 243, 248, 249, 241, 242, 248,
+    250, 241, 243, 248, 250, 251, 252, 253
+];
+
+// Thick Spice: 16 variants based on which neighbors are also THICK_SPICE
+const AUTOTILE_THICK_SPICE = [
+    258, 259, 260, 223, 224, 225, 232, 233,
+    234, 254, 255, 256, 261, 262, 263, 257
+];
+
+// Concrete and Wall: fixed tiles
+const AUTOTILE_CONCRETE = 209; // Rock tile (concrete looks like rock base)
+const AUTOTILE_WALL = 125;
 
 // ============================================================
 // Unit sprite mappings
-// Maps unit types to sprite sheet frames
-// g_sprites indexing: UNITS.SHP starts at index 238
-// Frame = groundSpriteID - base_index
-// Each unit has 8 directional frames (N,NE,E,SE,S,SW,W,NW)
 // ============================================================
 const UNIT_SPRITE_MAP = {
-    // UNITS.SHP (16x16 sprites)
     [UNIT_TYPE.QUAD]:         { sheet: 'units', frame: 0,  size: 16 },
     [UNIT_TYPE.TRIKE]:        { sheet: 'units', frame: 5,  size: 16 },
     [UNIT_TYPE.RAIDER_TRIKE]: { sheet: 'units', frame: 5,  size: 16 },
@@ -235,17 +258,12 @@ const UNIT_SPRITE_MAP = {
     [UNIT_TYPE.MCV]:          { sheet: 'units', frame: 15, size: 16 },
     [UNIT_TYPE.CARRYALL]:     { sheet: 'units', frame: 45, size: 16 },
     [UNIT_TYPE.ORNITHOPTER]:  { sheet: 'units', frame: 51, size: 16 },
-
-    // UNITS2.SHP (16x16 sprites) - heavier vehicles
     [UNIT_TYPE.TANK]:         { sheet: 'units2', frame: 0,  size: 16 },
     [UNIT_TYPE.LAUNCHER]:     { sheet: 'units2', frame: 0,  size: 16 },
     [UNIT_TYPE.DEVIATOR]:     { sheet: 'units2', frame: 0,  size: 16 },
     [UNIT_TYPE.SONIC_TANK]:   { sheet: 'units2', frame: 0,  size: 16 },
     [UNIT_TYPE.SIEGE_TANK]:   { sheet: 'units2', frame: 10, size: 16 },
     [UNIT_TYPE.DEVASTATOR]:   { sheet: 'units2', frame: 20, size: 16 },
-
-    // UNITS1.SHP (24x24 sprites) - larger units, infantry squads
-    // Infantry in UNITS.SHP smaller frames
     [UNIT_TYPE.SOLDIER]:      { sheet: 'units', frame: 73,  size: 16 },
     [UNIT_TYPE.INFANTRY]:     { sheet: 'units', frame: 91,  size: 16 },
     [UNIT_TYPE.TROOPER]:      { sheet: 'units', frame: 82,  size: 16 },
@@ -254,45 +272,44 @@ const UNIT_SPRITE_MAP = {
 };
 
 // ============================================================
-// Structure sprite mappings
-// Maps structure types to grids of terrain tile indices
-// These compose the building appearance from icon tiles
+// Structure sprite mappings (ICN tile compositions from ICON.MAP groups)
+// Extracted from groups 12-26 of ICON.MAP
 // ============================================================
 const STRUCTURE_SPRITE_MAP = {
     [STRUCTURE_TYPE.CONSTRUCTION_YARD]: {
-        tw: 2, th: 2, tiles: [157, 158, 173, 174]
+        tw: 2, th: 2, tiles: [299, 300, 301, 302]
     },
     [STRUCTURE_TYPE.WINDTRAP]: {
-        tw: 2, th: 2, tiles: [160, 161, 176, 177]
+        tw: 2, th: 2, tiles: [304, 305, 306, 307]
     },
     [STRUCTURE_TYPE.REFINERY]: {
-        tw: 3, th: 2, tiles: [163, 164, 165, 179, 180, 181]
+        tw: 3, th: 2, tiles: [345, 346, 347, 349, 350, 351]
     },
     [STRUCTURE_TYPE.LIGHT_FACTORY]: {
-        tw: 2, th: 2, tiles: [148, 149, 164, 165]
+        tw: 2, th: 2, tiles: [251, 252, 253, 258]
     },
     [STRUCTURE_TYPE.HEAVY_FACTORY]: {
-        tw: 3, th: 3, tiles: [144, 145, 146, 160, 161, 162, 176, 177, 178]
+        tw: 3, th: 2, tiles: [270, 271, 272, 276, 277, 278]
     },
     [STRUCTURE_TYPE.BARRACKS]: {
-        tw: 2, th: 2, tiles: [152, 153, 168, 169]
+        tw: 2, th: 2, tiles: [309, 310, 311, 312]
     },
     [STRUCTURE_TYPE.SPICE_SILO]: {
-        tw: 2, th: 2, tiles: [154, 155, 170, 171]
+        tw: 2, th: 2, tiles: [285, 286, 288, 289]
     },
     [STRUCTURE_TYPE.OUTPOST]: {
-        tw: 2, th: 2, tiles: [156, 157, 172, 173]
+        tw: 2, th: 2, tiles: [377, 378, 384, 385]
     },
     [STRUCTURE_TYPE.TURRET]: {
-        tw: 1, th: 1, tiles: [91]
+        tw: 1, th: 1, tiles: [364]
     },
     [STRUCTURE_TYPE.ROCKET_TURRET]: {
-        tw: 1, th: 1, tiles: [92]
+        tw: 1, th: 1, tiles: [372]
     },
     [STRUCTURE_TYPE.WALL]: {
-        tw: 1, th: 1, tiles: [91]
+        tw: 1, th: 1, tiles: [125]
     },
     [STRUCTURE_TYPE.CONCRETE]: {
-        tw: 1, th: 1, tiles: [85]
+        tw: 1, th: 1, tiles: [209]
     },
 };

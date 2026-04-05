@@ -63,8 +63,8 @@ export class Renderer {
                 const py = y * TILE_SIZE;
 
                 if (useSprites && tile.terrain !== TERRAIN.STRUCTURE) {
-                    // Use sprite-based terrain rendering
-                    this.sprites.drawTerrain(ctx, tile.terrain, px, py, TILE_SIZE, x, y);
+                    // Use sprite-based terrain rendering with autotiling
+                    this.sprites.drawTerrain(ctx, game.map, x, y, px, py, TILE_SIZE);
                 } else {
                     // Fallback to color-based rendering
                     ctx.fillStyle = TERRAIN_COLORS[tile.terrain] || '#c2a456';
