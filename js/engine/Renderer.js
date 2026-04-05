@@ -2,6 +2,7 @@ import { TERRAIN_COLORS } from '../data/terrain.js';
 import { TERRAIN_MINIMAP_COLORS, TERRAIN } from '../data/terrain.js';
 import { HOUSE_DATA } from '../data/houses.js';
 import { UNIT_TYPE } from '../data/units.js';
+import { SpriteManager } from './SpriteManager.js';
 
 const TILE_SIZE = 32;
 
@@ -12,6 +13,7 @@ export class Renderer {
         this.minimapCanvas = minimapCanvas;
         this.minimapCtx = minimapCanvas.getContext('2d');
         this.minimapSize = 128;
+        this.sprites = new SpriteManager();
     }
 
     resize(width, height) {
@@ -47,48 +49,42 @@ export class Renderer {
     _renderTerrain(ctx, game) {
         const camera = game.camera;
         const range = camera.getVisibleTileRange(TILE_SIZE);
+        const useSprites = this.sprites.ready();
+
+        // Disable image smoothing for crisp pixel art
+        ctx.imageSmoothingEnabled = false;
 
         for (let y = range.startY; y <= range.endY; y++) {
             for (let x = range.startX; x <= range.endX; x++) {
                 const tile = game.map.getTile(x, y);
                 if (!tile) continue;
 
-                const color = TERRAIN_COLORS[tile.terrain] || '#c2a456';
-                ctx.fillStyle = color;
-                ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                const px = x * TILE_SIZE;
+                const py = y * TILE_SIZE;
 
-                // Add subtle noise/variation to terrain
-                if (tile.terrain === TERRAIN.SAND || tile.terrain === TERRAIN.DUNE) {
-                    const hash = ((x * 7 + y * 13) % 5) * 3;
-                    ctx.fillStyle = `rgba(0,0,0,${0.02 + hash * 0.005})`;
-                    ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                if (useSprites && tile.terrain !== TERRAIN.STRUCTURE) {
+                    // Use sprite-based terrain rendering
+                    this.sprites.drawTerrain(ctx, tile.terrain, px, py, TILE_SIZE, x, y);
+                } else {
+                    // Fallback to color-based rendering
+                    ctx.fillStyle = TERRAIN_COLORS[tile.terrain] || '#c2a456';
+                    ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
                 }
 
-                // Spice sparkle effect
+                // Spice sparkle overlay (still adds life to sprite-based terrain)
                 if (tile.terrain === TERRAIN.SPICE || tile.terrain === TERRAIN.THICK_SPICE) {
                     const sparkle = Math.sin(Date.now() * 0.003 + x * 3 + y * 7) * 0.5 + 0.5;
-                    ctx.fillStyle = `rgba(255,200,100,${sparkle * 0.15})`;
-                    ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    ctx.fillStyle = `rgba(255,200,100,${sparkle * 0.1})`;
+                    ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
                 }
-
-                // Mountain shading
-                if (tile.terrain === TERRAIN.MOUNTAIN || tile.terrain === TERRAIN.PARTIAL_MOUNTAIN) {
-                    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-                    ctx.fillRect(x * TILE_SIZE + TILE_SIZE * 0.5, y * TILE_SIZE,
-                                TILE_SIZE * 0.5, TILE_SIZE);
-                    ctx.fillStyle = 'rgba(255,255,255,0.08)';
-                    ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE,
-                                TILE_SIZE * 0.5, TILE_SIZE * 0.5);
-                }
-
-                // Grid lines (subtle)
-                ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-                ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
             }
         }
     }
 
     _renderStructures(ctx, game) {
+        const useSprites = this.sprites.ready();
+        ctx.imageSmoothingEnabled = false;
+
         for (const structure of game.structures) {
             if (!structure.alive) continue;
 
@@ -101,27 +97,45 @@ export class Renderer {
             const house = HOUSE_DATA[structure.houseId];
             const baseColor = house ? house.color : '#888888';
 
-            // Structure body
-            ctx.fillStyle = structure.data.color;
-            ctx.fillRect(sx + 1, sy + 1, sw - 2, sh - 2);
+            // Try to render with sprite tiles
+            const drewSprite = useSprites &&
+                this.sprites.drawStructure(ctx, structure.type, sx, sy, sw, sh);
 
-            // House color border
-            ctx.strokeStyle = baseColor;
-            ctx.lineWidth = 2;
-            ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2);
-            ctx.lineWidth = 1;
+            if (drewSprite) {
+                // House color tint overlay
+                ctx.globalAlpha = 0.2;
+                ctx.fillStyle = baseColor;
+                ctx.fillRect(sx, sy, sw, sh);
+                ctx.globalAlpha = 1.0;
 
-            // Inner detail
-            ctx.fillStyle = 'rgba(0,0,0,0.2)';
-            ctx.fillRect(sx + 4, sy + 4, sw - 8, sh - 8);
+                // House color border
+                ctx.strokeStyle = baseColor;
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(sx + 0.5, sy + 0.5, sw - 1, sh - 1);
+                ctx.lineWidth = 1;
+            } else {
+                // Fallback: colored rectangles
+                ctx.fillStyle = structure.data.color;
+                ctx.fillRect(sx + 1, sy + 1, sw - 2, sh - 2);
+                ctx.strokeStyle = baseColor;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2);
+                ctx.lineWidth = 1;
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.fillRect(sx + 4, sy + 4, sw - 8, sh - 8);
+            }
 
-            // Structure name
+            // Structure name (always show for readability)
             const fontSize = Math.max(8, Math.min(11, sw / structure.data.name.length * 1.5));
-            ctx.fillStyle = '#ddd';
+            ctx.fillStyle = '#fff';
             ctx.font = `bold ${fontSize}px monospace`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
+            ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+            ctx.lineWidth = 2;
+            ctx.strokeText(structure.data.name, sx + sw / 2, sy + sh / 2);
             ctx.fillText(structure.data.name, sx + sw / 2, sy + sh / 2);
+            ctx.lineWidth = 1;
 
             // Health bar
             if (structure.hp < structure.maxHp) {
@@ -165,14 +179,17 @@ export class Renderer {
     }
 
     _renderUnits(ctx, game) {
+        const useSprites = this.sprites.ready();
+        ctx.imageSmoothingEnabled = false;
+
         for (const unit of game.units) {
             if (!unit.alive || !unit.visible) continue;
 
             const wx = unit.x * TILE_SIZE;
             const wy = unit.y * TILE_SIZE;
             const house = HOUSE_DATA[unit.houseId];
-            const unitColor = house ? house.color : '#aaa';
             const radius = TILE_SIZE * 0.35;
+            const unitSize = TILE_SIZE * 0.9;
 
             // Selection circle
             if (unit.selected) {
@@ -190,42 +207,42 @@ export class Renderer {
             ctx.ellipse(wx + 1, wy + radius * 0.4, radius * 0.8, radius * 0.3, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            // Unit body
-            ctx.fillStyle = unitColor;
-            ctx.beginPath();
+            // Draw unit sprite or fallback shape
+            const drewSprite = useSprites &&
+                this.sprites.drawUnit(ctx, unit.type, unit.houseId, wx, wy, unitSize);
 
-            if (unit.data.movementType === 0) {
-                // Infantry - smaller circle
-                ctx.arc(wx, wy, radius * 0.6, 0, Math.PI * 2);
-            } else if (unit.type === UNIT_TYPE.HARVESTER) {
-                // Harvester - rectangle
-                ctx.rect(wx - radius, wy - radius * 0.7, radius * 2, radius * 1.4);
-            } else if (unit.data.isAirUnit) {
-                // Air unit - diamond
-                ctx.moveTo(wx, wy - radius);
-                ctx.lineTo(wx + radius, wy);
-                ctx.lineTo(wx, wy + radius);
-                ctx.lineTo(wx - radius, wy);
-                ctx.closePath();
-            } else {
-                // Vehicle - rounded rect approximation
-                ctx.arc(wx, wy, radius, 0, Math.PI * 2);
+            if (!drewSprite) {
+                // Fallback: colored shapes
+                const unitColor = house ? house.color : '#aaa';
+                ctx.fillStyle = unitColor;
+                ctx.beginPath();
+                if (unit.data.movementType === 0) {
+                    ctx.arc(wx, wy, radius * 0.6, 0, Math.PI * 2);
+                } else if (unit.type === UNIT_TYPE.HARVESTER) {
+                    ctx.rect(wx - radius, wy - radius * 0.7, radius * 2, radius * 1.4);
+                } else if (unit.data.isAirUnit) {
+                    ctx.moveTo(wx, wy - radius);
+                    ctx.lineTo(wx + radius, wy);
+                    ctx.lineTo(wx, wy + radius);
+                    ctx.lineTo(wx - radius, wy);
+                    ctx.closePath();
+                } else {
+                    ctx.arc(wx, wy, radius, 0, Math.PI * 2);
+                }
+                ctx.fill();
+                ctx.strokeStyle = house ? house.darkColor : '#444';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.lineWidth = 1;
             }
-            ctx.fill();
 
-            // Unit outline
-            ctx.strokeStyle = house ? house.darkColor : '#444';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            ctx.lineWidth = 1;
-
-            // Inner highlight
-            ctx.fillStyle = house ? house.lightColor : '#ccc';
-            ctx.globalAlpha = 0.3;
-            ctx.beginPath();
-            ctx.arc(wx - radius * 0.2, wy - radius * 0.2, radius * 0.4, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.globalAlpha = 1.0;
+            // House color tint overlay for sprites (subtle)
+            if (drewSprite && house) {
+                ctx.globalAlpha = 0.15;
+                ctx.fillStyle = house.color;
+                ctx.fillRect(wx - unitSize/2, wy - unitSize/2, unitSize, unitSize);
+                ctx.globalAlpha = 1.0;
+            }
 
             // Harvester spice indicator
             if (unit.type === UNIT_TYPE.HARVESTER && unit.spiceCarried > 0) {
