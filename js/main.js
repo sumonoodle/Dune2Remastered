@@ -37,6 +37,10 @@ class Game {
         this.placementType = null;
         this.placementData = null;
 
+        // Command feedback markers
+        this.commandMarkers = [];
+        this.projectiles = [];
+
         // Game loop
         this.tickCount = 0;
         this.lastTime = 0;
@@ -126,6 +130,16 @@ class Game {
             const worldPos = this.camera.screenToWorld(x, y);
             const tileX = Math.floor(worldPos.x / TILE_SIZE);
             const tileY = Math.floor(worldPos.y / TILE_SIZE);
+
+            // Rally point: if a production structure is selected, set rally point
+            const selectedStructure = this.structures.find(s => s.selected && s.alive && s.houseId === this.playerHouse);
+            if (selectedStructure && selectedStructure.data.builds) {
+                selectedStructure.rallyX = tileX + 0.5;
+                selectedStructure.rallyY = tileY + 0.5;
+                this._addCommandMarker(worldPos.x / TILE_SIZE, worldPos.y / TILE_SIZE, 'rally');
+                return;
+            }
+
             const selected = this.units.filter(u => u.selected && u.alive);
 
             if (selected.length === 0) return;
@@ -136,6 +150,7 @@ class Game {
                 for (const unit of selected) {
                     unit.attack(enemy);
                 }
+                this._addCommandMarker(enemy.x, enemy.y, 'attack');
                 return;
             }
 
@@ -160,6 +175,7 @@ class Game {
                 unit.moveTo(worldPos.x / TILE_SIZE, worldPos.y / TILE_SIZE, this);
                 unit.state = 'moving';
             }
+            this._addCommandMarker(worldPos.x / TILE_SIZE, worldPos.y / TILE_SIZE, 'move');
         });
 
         // Drag select
@@ -367,7 +383,7 @@ class Game {
     }
 
     canPlaceStructure(type, tileX, tileY) {
-        return Structure.canPlace(this.map, type, tileX, tileY, this.structures);
+        return Structure.canPlace(this.map, type, tileX, tileY, this.structures, this.playerHouse);
     }
 
     createUnit(type, tileX, tileY, houseId) {
@@ -420,6 +436,44 @@ class Game {
             }
         }
         return best;
+    }
+
+    _updateCursor() {
+        const selected = this.units.filter(u => u.selected && u.alive);
+        if (this.placementMode) {
+            this.canvas.style.cursor = 'cell';
+            return;
+        }
+        if (selected.length === 0) {
+            this.canvas.style.cursor = 'default';
+            return;
+        }
+
+        const worldPos = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+        const tileX = worldPos.x / TILE_SIZE;
+        const tileY = worldPos.y / TILE_SIZE;
+
+        // Check for enemy under cursor
+        const enemy = this._findEnemyAt(tileX, tileY);
+        if (enemy) {
+            this.canvas.style.cursor = 'crosshair';
+            return;
+        }
+
+        // Check for spice under cursor with harvester selected
+        const tile = this.map.getTile(Math.floor(tileX), Math.floor(tileY));
+        const hasHarvester = selected.some(u => u.type === UNIT_TYPE.HARVESTER);
+        if (hasHarvester && tile &&
+            (tile.terrain === TERRAIN.SPICE || tile.terrain === TERRAIN.THICK_SPICE)) {
+            this.canvas.style.cursor = 'grab';
+            return;
+        }
+
+        this.canvas.style.cursor = 'pointer';
+    }
+
+    _addCommandMarker(tileX, tileY, type) {
+        this.commandMarkers.push({ x: tileX, y: tileY, type, timer: 0.6 });
     }
 
     _findUnitAt(worldTileX, worldTileY) {
@@ -571,6 +625,7 @@ class Game {
 
         // Player units
         this.createUnit(UNIT_TYPE.HARVESTER, 13, 8, this.playerHouse);
+        this.createUnit(UNIT_TYPE.CARRYALL, 9, 5, this.playerHouse);
         this.createUnit(UNIT_TYPE.TRIKE, 5, 11, this.playerHouse);
         this.createUnit(UNIT_TYPE.TRIKE, 6, 11, this.playerHouse);
         this.createUnit(UNIT_TYPE.SOLDIER, 10, 11, this.playerHouse);
@@ -584,6 +639,7 @@ class Game {
 
         // Enemy units
         this.createUnit(UNIT_TYPE.HARVESTER, 57, 52, this.enemyHouse);
+        this.createUnit(UNIT_TYPE.CARRYALL, 53, 49, this.enemyHouse);
         this.createUnit(UNIT_TYPE.TANK, 49, 55, this.enemyHouse);
         this.createUnit(UNIT_TYPE.TANK, 50, 55, this.enemyHouse);
         this.createUnit(UNIT_TYPE.SOLDIER, 54, 55, this.enemyHouse);
@@ -612,6 +668,14 @@ class Game {
         for (const structure of this.structures) {
             structure.update(dt, this);
         }
+
+        // Update projectiles and command markers
+        if (this.projectiles) {
+            for (const p of this.projectiles) p.timer -= dt;
+            this.projectiles = this.projectiles.filter(p => p.timer > 0);
+        }
+        for (const m of this.commandMarkers) m.timer -= dt;
+        this.commandMarkers = this.commandMarkers.filter(m => m.timer > 0);
 
         // Spice regrowth
         this.map.growSpice(this.tickCount);
@@ -643,6 +707,9 @@ class Game {
             }
             return true;
         });
+
+        // Update cursor based on hover context
+        this._updateCursor();
 
         // Update UI periodically
         if (this.tickCount % 30 === 0) {

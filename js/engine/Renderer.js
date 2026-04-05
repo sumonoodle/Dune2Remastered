@@ -34,6 +34,7 @@ export class Renderer {
         this._renderStructures(ctx, game);
         this._renderUnits(ctx, game);
         this._renderProjectiles(ctx, game);
+        this._renderCommandMarkers(ctx, game);
 
         ctx.restore();
 
@@ -135,13 +136,37 @@ export class Renderer {
                 ctx.strokeRect(sx - 1, sy - 1, sw + 2, sh + 2);
                 ctx.setLineDash([]);
                 ctx.lineWidth = 1;
+
+                // Rally point marker (only for selected production structures)
+                if (structure.rallyX !== null && structure.data.builds) {
+                    const rx = structure.rallyX * TILE_SIZE;
+                    const ry = structure.rallyY * TILE_SIZE;
+                    // Line from structure center to rally point
+                    ctx.strokeStyle = 'rgba(0, 255, 128, 0.5)';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(sx + sw / 2, sy + sh / 2);
+                    ctx.lineTo(rx, ry);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    // Rally flag
+                    ctx.fillStyle = '#00ff80';
+                    ctx.beginPath();
+                    ctx.moveTo(rx, ry);
+                    ctx.lineTo(rx, ry - 12);
+                    ctx.lineTo(rx + 8, ry - 8);
+                    ctx.lineTo(rx, ry - 4);
+                    ctx.fill();
+                    ctx.lineWidth = 1;
+                }
             }
         }
     }
 
     _renderUnits(ctx, game) {
         for (const unit of game.units) {
-            if (!unit.alive) continue;
+            if (!unit.alive || !unit.visible) continue;
 
             const wx = unit.x * TILE_SIZE;
             const wy = unit.y * TILE_SIZE;
@@ -219,6 +244,14 @@ export class Renderer {
                                      radius * 2, 3, unit.hp / unit.maxHp);
             }
 
+            // Carryall cargo indicator
+            if (unit.type === UNIT_TYPE.CARRYALL && unit.carryingUnit) {
+                ctx.fillStyle = '#ffaa00';
+                ctx.font = 'bold 8px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('CARGO', wx, wy + radius + 12);
+            }
+
             // Path visualization (debug)
             if (unit.selected && unit.path && unit.pathIndex < unit.path.length) {
                 ctx.strokeStyle = 'rgba(255,255,255,0.25)';
@@ -236,7 +269,60 @@ export class Renderer {
     }
 
     _renderProjectiles(ctx, game) {
-        // Stub for future projectile rendering
+        if (!game.projectiles) return;
+        for (const p of game.projectiles) {
+            const alpha = p.timer / 0.15;
+            ctx.strokeStyle = `rgba(255, 200, 50, ${alpha})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(p.x1 * TILE_SIZE, p.y1 * TILE_SIZE);
+            ctx.lineTo(p.x2 * TILE_SIZE, p.y2 * TILE_SIZE);
+            ctx.stroke();
+            ctx.lineWidth = 1;
+        }
+    }
+
+    _renderCommandMarkers(ctx, game) {
+        for (const m of game.commandMarkers) {
+            const alpha = m.timer / 0.6;
+            const wx = m.x * TILE_SIZE;
+            const wy = m.y * TILE_SIZE;
+            const r = 8 + (1 - alpha) * 12; // Expand outward
+
+            if (m.type === 'move') {
+                ctx.strokeStyle = `rgba(0, 255, 0, ${alpha})`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(wx, wy, r, 0, Math.PI * 2);
+                ctx.stroke();
+                // Crosshair
+                ctx.beginPath();
+                ctx.moveTo(wx - 4, wy);
+                ctx.lineTo(wx + 4, wy);
+                ctx.moveTo(wx, wy - 4);
+                ctx.lineTo(wx, wy + 4);
+                ctx.stroke();
+            } else if (m.type === 'attack') {
+                ctx.strokeStyle = `rgba(255, 50, 50, ${alpha})`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(wx, wy, r, 0, Math.PI * 2);
+                ctx.stroke();
+                // X marker
+                ctx.beginPath();
+                ctx.moveTo(wx - 5, wy - 5);
+                ctx.lineTo(wx + 5, wy + 5);
+                ctx.moveTo(wx + 5, wy - 5);
+                ctx.lineTo(wx - 5, wy + 5);
+                ctx.stroke();
+            } else if (m.type === 'rally') {
+                ctx.fillStyle = `rgba(0, 255, 128, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(wx, wy, 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.lineWidth = 1;
+        }
     }
 
     _renderHealthBar(ctx, x, y, width, height, ratio) {

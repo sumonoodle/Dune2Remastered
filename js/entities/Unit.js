@@ -1,5 +1,6 @@
 import { UNIT_DATA, UNIT_TYPE } from '../data/units.js';
 import { TERRAIN } from '../data/terrain.js';
+import { STRUCTURE_TYPE } from '../data/structures.js';
 
 const TILE_SIZE = 32;
 
@@ -25,7 +26,10 @@ export class Unit {
         this.pathIndex = 0;
         this.targetX = this.x;
         this.targetY = this.y;
-        this.moveSpeed = Math.max(1.5, this.data.speed * 0.06); // tiles per second
+        // Air units fly faster since they ignore terrain
+        this.moveSpeed = this.data.isAirUnit
+            ? Math.max(6, this.data.speed * 0.08)
+            : Math.max(1.5, this.data.speed * 0.06); // tiles per second
 
         // Harvester-specific
         this.spiceCarried = 0;
@@ -33,11 +37,13 @@ export class Unit {
         this.harvesterState = 'idle'; // idle, seeking, harvesting, returning, depositing
         this.harvestTimer = 0;
         this.assignedRefinery = null;
+        this.carriedByCarryall = false; // true when being transported
 
         // Carryall-specific
         this.carryingUnit = null;
-        this.carryallState = 'idle'; // idle, pickup, delivering
+        this.carryallState = 'idle'; // idle, pickingUp, delivering
         this.carryallTarget = null;
+        this.carryallScanTimer = 0;
 
         // Combat
         this.attackTarget = null;
@@ -46,10 +52,11 @@ export class Unit {
         // State
         this.state = 'idle'; // idle, moving, attacking, harvesting
         this.alive = true;
+        this.visible = true; // false when carried by carryall
     }
 
     update(dt, game) {
-        if (!this.alive) return;
+        if (!this.alive || this.carriedByCarryall) return;
 
         this.attackCooldown = Math.max(0, this.attackCooldown - dt);
 
@@ -225,8 +232,155 @@ export class Unit {
     }
 
     _updateCarryall(dt, game) {
-        // Simple carryall: just hover around for now
-        // Full implementation will pick up harvesters
+        switch (this.carryallState) {
+            case 'idle':
+                this.carryallScanTimer += dt;
+                if (this.carryallScanTimer < 1.0) return; // Scan every second
+                this.carryallScanTimer = 0;
+
+                // Find a harvester that needs pickup (full and not already assigned a carryall)
+                const harvester = this._findHarvesterNeedingPickup(game);
+                if (harvester) {
+                    this.carryallTarget = harvester;
+                    harvester.assignedCarryall = this;
+                    this.carryallState = 'pickingUp';
+                    // Fly directly to harvester (air units ignore terrain)
+                    this._flyTo(harvester.x, harvester.y);
+                }
+                break;
+
+            case 'pickingUp':
+                if (!this.carryallTarget || !this.carryallTarget.alive) {
+                    this._carryallReset();
+                    break;
+                }
+
+                // Update flight target to track moving harvester
+                if (!this.path || this.pathIndex >= (this.path?.length || 0)) {
+                    const dx = this.carryallTarget.x - this.x;
+                    const dy = this.carryallTarget.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < 0.5) {
+                        // Pick up the harvester
+                        this.carryingUnit = this.carryallTarget;
+                        this.carryingUnit.visible = false;
+                        this.carryingUnit.carriedByCarryall = true;
+                        this.carryingUnit.path = null;
+
+                        // Determine delivery destination
+                        if (this.carryingUnit.spiceCarried >= this.carryingUnit.spiceCapacity * 0.8) {
+                            // Full harvester → deliver to refinery
+                            const refinery = game.findNearestStructure(
+                                this.x, this.y, this.houseId, STRUCTURE_TYPE.REFINERY
+                            );
+                            if (refinery) {
+                                const dropX = refinery.x + refinery.data.tileWidth / 2;
+                                const dropY = refinery.y + refinery.data.tileHeight;
+                                this._flyTo(dropX, dropY);
+                                this.carryallState = 'delivering';
+                            } else {
+                                this._carryallDropUnit();
+                            }
+                        } else {
+                            // Empty/partial harvester → deliver to nearest spice
+                            const spiceTile = this._findNearestSpice(game);
+                            if (spiceTile) {
+                                this._flyTo(spiceTile.x + 0.5, spiceTile.y + 0.5);
+                                this.carryallState = 'delivering';
+                            } else {
+                                this._carryallDropUnit();
+                            }
+                        }
+                    } else {
+                        this._flyTo(this.carryallTarget.x, this.carryallTarget.y);
+                    }
+                }
+                break;
+
+            case 'delivering':
+                if (!this.path || this.pathIndex >= (this.path?.length || 0)) {
+                    this._carryallDropUnit();
+                }
+                break;
+        }
+    }
+
+    _flyTo(targetX, targetY) {
+        // Air units fly in a straight line (no A* needed)
+        this.path = [{ x: targetX, y: targetY }];
+        this.pathIndex = 0;
+        this.state = 'moving';
+    }
+
+    _carryallDropUnit() {
+        if (this.carryingUnit) {
+            this.carryingUnit.x = this.x;
+            this.carryingUnit.y = this.y;
+            this.carryingUnit.visible = true;
+            this.carryingUnit.carriedByCarryall = false;
+            this.carryingUnit.assignedCarryall = null;
+            // Resume harvester AI
+            if (this.carryingUnit.type === UNIT_TYPE.HARVESTER) {
+                this.carryingUnit.harvesterState = 'idle';
+            }
+        }
+        this._carryallReset();
+    }
+
+    _carryallReset() {
+        if (this.carryallTarget) {
+            this.carryallTarget.assignedCarryall = null;
+        }
+        this.carryingUnit = null;
+        this.carryallTarget = null;
+        this.carryallState = 'idle';
+        this.state = 'idle';
+    }
+
+    _findHarvesterNeedingPickup(game) {
+        let best = null;
+        let bestDist = Infinity;
+
+        for (const unit of game.units) {
+            if (!unit.alive || unit.houseId !== this.houseId) continue;
+            if (unit.type !== UNIT_TYPE.HARVESTER) continue;
+            if (unit.carriedByCarryall || unit.assignedCarryall) continue;
+
+            // Pick up harvesters that are full and returning
+            const isFull = unit.spiceCarried >= unit.spiceCapacity * 0.8;
+            const isReturning = unit.harvesterState === 'returning';
+            if (!isFull && !isReturning) continue;
+
+            const dx = unit.x - this.x;
+            const dy = unit.y - this.y;
+            const dist = dx * dx + dy * dy;
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = unit;
+            }
+        }
+        return best;
+    }
+
+    _findNearestSpice(game) {
+        const tx = Math.floor(this.x);
+        const ty = Math.floor(this.y);
+
+        for (let r = 1; r < 30; r++) {
+            for (let dy = -r; dy <= r; dy++) {
+                for (let dx = -r; dx <= r; dx++) {
+                    if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+                    const sx = tx + dx;
+                    const sy = ty + dy;
+                    const tile = game.map.getTile(sx, sy);
+                    if (tile && (tile.terrain === TERRAIN.SPICE || tile.terrain === TERRAIN.THICK_SPICE)) {
+                        return { x: sx, y: sy };
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     _updateCombatUnit(dt, game) {
