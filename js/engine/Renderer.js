@@ -1,3 +1,11 @@
+/**
+ * Renderer - Draws the game world using original Dune II ICN tiles.
+ *
+ * Terrain rendering uses pre-computed sprite IDs from the autotile system.
+ * Each tile in the map stores its final ICN sprite ID, so rendering is a
+ * simple tile sheet blit — no procedural overlays or gradients needed.
+ */
+
 import { TERRAIN_COLORS } from '../data/terrain.js';
 import { TERRAIN_MINIMAP_COLORS, TERRAIN } from '../data/terrain.js';
 import { HOUSE_DATA } from '../data/houses.js';
@@ -51,7 +59,7 @@ export class Renderer {
         const range = camera.getVisibleTileRange(TILE_SIZE);
         const useSprites = this.sprites.ready();
 
-        // Disable image smoothing for crisp pixel art
+        // Crisp pixel art rendering
         ctx.imageSmoothingEnabled = false;
 
         for (let y = range.startY; y <= range.endY; y++) {
@@ -63,18 +71,11 @@ export class Renderer {
                 const py = y * TILE_SIZE;
 
                 if (useSprites && tile.terrain !== TERRAIN.STRUCTURE) {
-                    // Use sprite-based terrain rendering with autotiling
-                    this.sprites.drawTerrain(ctx, game.map, x, y, px, py, TILE_SIZE);
+                    // Draw the pre-computed ICN tile directly from the tile sheet
+                    this.sprites.drawTerrainTile(ctx, tile.spriteID, px, py, TILE_SIZE);
                 } else {
                     // Fallback to color-based rendering
                     ctx.fillStyle = TERRAIN_COLORS[tile.terrain] || '#c2a456';
-                    ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-                }
-
-                // Spice shimmer (subtle animated sparkle)
-                if (tile.terrain === TERRAIN.SPICE || tile.terrain === TERRAIN.THICK_SPICE) {
-                    const sparkle = Math.sin(Date.now() * 0.002 + x * 3 + y * 7) * 0.5 + 0.5;
-                    ctx.fillStyle = `rgba(255,200,100,${sparkle * 0.06})`;
                     ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
                 }
             }
@@ -125,7 +126,7 @@ export class Renderer {
                 ctx.fillRect(sx + 4, sy + 4, sw - 8, sh - 8);
             }
 
-            // Structure name (always show for readability)
+            // Structure name
             const fontSize = Math.max(8, Math.min(11, sw / structure.data.name.length * 1.5));
             ctx.fillStyle = '#fff';
             ctx.font = `bold ${fontSize}px monospace`;
@@ -151,11 +152,10 @@ export class Renderer {
                 ctx.setLineDash([]);
                 ctx.lineWidth = 1;
 
-                // Rally point marker (only for selected production structures)
+                // Rally point
                 if (structure.rallyX !== null && structure.data.builds) {
                     const rx = structure.rallyX * TILE_SIZE;
                     const ry = structure.rallyY * TILE_SIZE;
-                    // Line from structure center to rally point
                     ctx.strokeStyle = 'rgba(0, 255, 128, 0.5)';
                     ctx.lineWidth = 1;
                     ctx.setLineDash([4, 4]);
@@ -164,7 +164,6 @@ export class Renderer {
                     ctx.lineTo(rx, ry);
                     ctx.stroke();
                     ctx.setLineDash([]);
-                    // Rally flag
                     ctx.fillStyle = '#00ff80';
                     ctx.beginPath();
                     ctx.moveTo(rx, ry);
@@ -212,7 +211,6 @@ export class Renderer {
                 this.sprites.drawUnit(ctx, unit.type, unit.houseId, wx, wy, unitSize);
 
             if (!drewSprite) {
-                // Fallback: colored shapes
                 const unitColor = house ? house.color : '#aaa';
                 ctx.fillStyle = unitColor;
                 ctx.beginPath();
@@ -236,7 +234,7 @@ export class Renderer {
                 ctx.lineWidth = 1;
             }
 
-            // House color tint overlay for sprites (subtle)
+            // House color tint for sprites
             if (drewSprite && house) {
                 ctx.globalAlpha = 0.15;
                 ctx.fillStyle = house.color;
@@ -255,7 +253,7 @@ export class Renderer {
                               radius * 2, 3);
             }
 
-            // Health bar (only show when damaged)
+            // Health bar (only when damaged)
             if (unit.hp < unit.maxHp) {
                 this._renderHealthBar(ctx, wx - radius, wy - radius - 6,
                                      radius * 2, 3, unit.hp / unit.maxHp);
@@ -304,7 +302,7 @@ export class Renderer {
             const alpha = m.timer / 0.6;
             const wx = m.x * TILE_SIZE;
             const wy = m.y * TILE_SIZE;
-            const r = 8 + (1 - alpha) * 12; // Expand outward
+            const r = 8 + (1 - alpha) * 12;
 
             if (m.type === 'move') {
                 ctx.strokeStyle = `rgba(0, 255, 0, ${alpha})`;
@@ -312,7 +310,6 @@ export class Renderer {
                 ctx.beginPath();
                 ctx.arc(wx, wy, r, 0, Math.PI * 2);
                 ctx.stroke();
-                // Crosshair
                 ctx.beginPath();
                 ctx.moveTo(wx - 4, wy);
                 ctx.lineTo(wx + 4, wy);
@@ -325,7 +322,6 @@ export class Renderer {
                 ctx.beginPath();
                 ctx.arc(wx, wy, r, 0, Math.PI * 2);
                 ctx.stroke();
-                // X marker
                 ctx.beginPath();
                 ctx.moveTo(wx - 5, wy - 5);
                 ctx.lineTo(wx + 5, wy + 5);
@@ -387,7 +383,6 @@ export class Renderer {
         ctx.strokeRect(screenPos.x, screenPos.y, w, h);
         ctx.lineWidth = 1;
 
-        // Show structure name
         ctx.fillStyle = '#fff';
         ctx.font = '11px monospace';
         ctx.textAlign = 'center';
